@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Student — Bus Tracker</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; background: #f4f6f8; color: #1a1a1a; }
+  @media (prefers-color-scheme: dark) { body { background:#16181c; color:#eaeaea;} .card{background:#22252b;} }
+  .card { background: white; border-radius: 14px; padding: 26px 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); max-width: 380px; width: 100%; text-align: center; }
+  h1 { font-size: 1.2rem; margin-bottom: 4px; }
+  p.sub { font-size: 0.82rem; opacity: 0.6; margin-bottom: 18px; }
+  input { width: 100%; padding: 10px; font-size: 1rem; border-radius: 8px; border: 1px solid #ccc; margin-bottom: 12px; box-sizing: border-box; }
+  button { width: 100%; padding: 12px; font-size: 1rem; border-radius: 8px; border: none; background: #2563eb; color: white; cursor: pointer; }
+  button:disabled { background: #9ca3af; }
+  .status-box { margin-top: 18px; padding: 16px; border-radius: 10px; font-size: 0.9rem; }
+  .waiting { background: #f3f4f6; }
+  @media (prefers-color-scheme: dark) { .waiting { background: #2a2d34; } }
+  .far { background: #fef3c7; color: #92400e; }
+  .arrived { background: #d1fae5; color: #065f46; font-weight: 600; }
+  .err { background: #fee2e2; color: #991b1b; }
+  .distance-value { font-size: 1.3rem; font-weight: 700; margin-top: 6px; }
+  .small { font-size: 0.75rem; opacity: 0.6; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>🚌 My Bus Tracker</h1>
+  <p class="sub">Enter your Student ID to watch the distance between your bus and your stop.</p>
+
+  <input type="text" id="studentIdInput" placeholder="Your Student ID (e.g. student_1)">
+  <button id="startBtn" onclick="startTracking()">Start Watching</button>
+
+  <div class="status-box waiting" id="statusBox" style="display:none;"></div>
+  <div class="small" id="detailText"></div>
+</div>
+
+<script>
+  const RADIUS_METERS = 2000; // 2 km
+  const POLL_INTERVAL_MS = 5000; // check every 5 seconds
+
+  let studentId = null;
+  let pollTimer = null;
+
+  function setStatus(className, html) {
+    const box = document.getElementById("statusBox");
+    box.style.display = "block";
+    box.className = "status-box " + className;
+    box.innerHTML = html;
+  }
+
+  function startTracking() {
+    studentId = document.getElementById("studentIdInput").value.trim();
+    const btn = document.getElementById("startBtn");
+
+    if (!studentId) {
+      setStatus("err", "Please enter your Student ID.");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Watching...";
+    setStatus("waiting", "Checking your assignment...");
+
+    if (pollTimer) clearInterval(pollTimer);
+    checkDistance(); // run once immediately
+    pollTimer = setInterval(checkDistance, POLL_INTERVAL_MS);
+  }
+
+  // Asks the server: "what's the current distance between my bus and my stop?"
+  // No geolocation is used here at all — this is purely bus-position vs
+  // fixed-stop-position, both already known server-side.
+  async function checkDistance() {
+    if (!studentId) return;
+
+    try {
+      const res = await fetch("/api/bus-stop-distance/" + encodeURIComponent(studentId));
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStatus("err", data.error || "Could not find your assignment.");
+        return;
+      }
+
+      const data = await res.json();
+
+      if (!data.busLocationKnown) {
+        setStatus("waiting", `Watching Bus <b>${data.busId}</b> → Stop <b>${data.stopName}</b><br><span style="font-weight:400;font-size:0.8rem;">No location received from this bus yet.</span>`);
+        return;
+      }
+
+      const distance = data.distanceMeters;
+
+      if (distance <= RADIUS_METERS) {
+        setStatus("arrived", `🔔 Bus <b>${data.busId}</b> is near <b>${data.stopName}</b>!<div class="distance-value">${distance.toFixed(0)} m away</div>`);
+      } else {
+        const km = (distance / 1000).toFixed(2);
+        setStatus("far", `Bus <b>${data.busId}</b> → Stop <b>${data.stopName}</b><div class="distance-value">${km} km away</div>`);
+      }
+    } catch (e) {
+      // silently ignore a single failed poll; will retry on next interval
+    }
+  }
+</script>
+</body>
+</html>
